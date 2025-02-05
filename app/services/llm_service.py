@@ -138,3 +138,39 @@ Return ONLY the title."""
         )
 
         return response.choices[0].message.content.strip()
+
+    async def generate_quick_prompts(self, document_id: str) -> list:
+        # Get document content from vector store
+        relevant_chunks = self.vector_store.get_relevant_chunks(
+            question="What is this document about?",
+            document_id=document_id,
+            n_results=1  # Get main content
+        )
+
+        prompt = f"""Based on this document content, suggest 3 important questions that would help understand the key aspects of the document.
+
+Content: {relevant_chunks[0]}
+
+Generate 3 clear, specific questions. Each question should focus on different aspects of the document.
+Keep questions concise and directly related to the content."""
+
+        response = self.client.chat.completions.create(
+            model="llama-3.2-3b-preview",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "Generate focused, relevant questions about documents."
+                },
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            max_completion_tokens=150
+        )
+
+    # Split response into individual questions and clean them
+        questions = [
+            q.strip() for q in response.choices[0].message.content.split('\n')
+            if q.strip() and '?' in q
+        ][:3]  # Ensure we only get 3 questions
+
+        return questions

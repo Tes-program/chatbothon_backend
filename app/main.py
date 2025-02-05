@@ -241,3 +241,28 @@ async def add_chat(
         "answer": chat.answer,
         "created_at": chat.created_at
     }
+
+@app.get("/documents/{document_id}/suggested-prompts")
+async def get_suggested_prompts(
+    document_id: int,
+    current_user: user.User = Depends(auth_handler.get_current_user),
+    db: Session = Depends(get_db)
+):
+    # Verify document belongs to user
+    document = db.query(user.Document)\
+        .filter(
+            user.Document.id == document_id,
+            user.Document.user_id == current_user.id
+        ).first()
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    # Generate prompts using LLM
+    prompts = await llm_service.generate_quick_prompts(
+        f"user_{current_user.id}_{document_id}"
+    )
+
+    return {
+        "document_id": document_id,
+        "suggested_prompts": prompts
+    }
