@@ -13,6 +13,7 @@ from .auth.routes import router as auth_router
 from .models import user
 from .database import engine, get_db
 from fastapi import Request
+from pydantic import BaseModel
 
 
 app = FastAPI()
@@ -36,6 +37,11 @@ app.add_middleware(
 app.include_router(auth_router, prefix="/auth", tags=["auth"])
 
 
+class QuestionRequest(BaseModel):
+    question: str
+    document_id: int
+
+
 @app.post("/upload")
 async def upload_document(
     file: UploadFile = File(...),
@@ -43,16 +49,27 @@ async def upload_document(
     db: Session = Depends(get_db)
 ):
     try:
-        # Read content once
         content = await file.read()
         chunks = document_processor.process_pdf(content)
-
-        # Reset file position
         await file.seek(0)
 
         result = await llm_service.analyze_document(chunks)
         document_service = DocumentService(db)
-        document = await document_service.save_document(file, current_user.id, title=result["title"])
+        document = await document_service.save_document(
+            file,
+            current_user.id,
+            title=result["title"]
+        )
+
+        # Store initial chat history with analysis
+        chat = ChatHistory(
+            document_id=document.id,
+            question="What is this document about?",
+            answer=result["analysis"]
+        )
+        db.add(chat)
+        db.commit()
+        db.refresh(chat)
 
         document_id = f"user_{current_user.id}_{document.id}"
         document_service.vector_store.store_chunks(chunks, document_id)
@@ -68,17 +85,65 @@ async def upload_document(
 
 @app.post("/ask")
 async def ask_question(
-    question: str,
-    document_id: str,
-    user_id: str = Depends(auth_handler.verify_token)
+    request: QuestionRequest,
+    current_user: user.User = Depends(auth_handler.get_current_user),
+    db: Session = Depends(get_db)
 ):
-    # Here you'd retrieve the relevant chunks from your database
-    # For now, using a placeholder
-    context = "document_context"
-    answer = await llm_service.answer_question(context, question)
-    return {"answer": answer}
+    # Verify document belongs to user
+    document = db.query(user.Document)\
+        .filter(
+            user.Document.id == request.document_id,
+            user.Document.user_id == current_user.id
+    )\
+        .first()
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
 
+    # Get answer using LLM
+    answer = await llm_service.answer_question(
+        request.question,
+        f"user_{current_user.id}_{request.document_id}"
+    )
+
+    # Store chat history
+    chat = ChatHistory(
+        document_id=request.document_id,
+        question=request.question,
+        answer=answer
+    )
+    db.add(chat)
+    db.commit()
+    db.refresh(chat)
+
+    return {
+        "id": chat.id,
+        "question": chat.question,
+        "answer": answer,
+        "created_at": chat.created_at
+    }
 # New endpoints in main.py
+
+
+@app.get("/documents/history")
+async def get_document_history(
+    current_user: user.User = Depends(auth_handler.get_current_user),
+    db: Session = Depends(get_db)
+):
+    documents = db.query(user.Document)\
+        .filter(user.Document.user_id == current_user.id)\
+        .order_by(user.Document.created_at.desc())\
+        .all()
+
+    history = []
+    for doc in documents:
+        history.append({
+            "document_id": doc.id,
+            "filename": doc.filename,
+            "title": doc.title,
+            "created_at": doc.created_at,
+        })
+
+    return history
 
 
 @app.get("/documents/{document_id}")
@@ -150,13 +215,15 @@ async def add_chat(
         .filter(
             user.Document.id == document_id,
             user.Document.user_id == current_user.id
-    )\
-        .first()
+    ).first()
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
 
     # Get answer using LLM
-    answer = await llm_service.answer_question(question, str(document_id))
+    answer = await llm_service.answer_question(
+        question=question,
+        document_id=f"user_{current_user.id}_{document_id}"
+    )
 
     # Store in chat history
     chat = ChatHistory(
@@ -174,35 +241,3 @@ async def add_chat(
         "answer": chat.answer,
         "created_at": chat.created_at
     }
-
-
-@app.get("/documents/history")
-async def get_document_history(
-    current_user: user.User = Depends(auth_handler.get_current_user),
-    db: Session = Depends(get_db)
-):
-    documents = db.query(user.Document)\
-        .filter(user.Document.user_id == current_user.id)\
-        .order_by(user.Document.created_at.desc())\
-        .all()
-
-    history = []
-    for doc in documents:
-        latest_chat = db.query(ChatHistory)\
-            .filter(ChatHistory.document_id == doc.id)\
-            .order_by(ChatHistory.created_at.desc())\
-            .first()
-
-        history.append({
-            "document_id": doc.id,
-            "filename": doc.filename,
-            "title": doc.title,
-            "created_at": doc.created_at,
-            "last_chat": {
-                "question": latest_chat.question if latest_chat else None,
-                "answer": latest_chat.answer if latest_chat else None,
-                "timestamp": latest_chat.created_at if latest_chat else None
-            }
-        })
-
-    return history

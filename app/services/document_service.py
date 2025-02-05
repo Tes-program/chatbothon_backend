@@ -1,4 +1,5 @@
 import os
+from app.models.document import DocumentAnalysis
 from app.models.user import Document
 from app.services.document_processor import DocumentProcessor
 from app.services.vector_store import VectorStore
@@ -48,3 +49,13 @@ class DocumentService:
         self.db.refresh(db_document)
 
         return db_document
+
+    async def store_document_analysis(self, document_id: int, analysis: str):
+        db_analysis = DocumentAnalysis(
+            document_id=document_id,
+            analysis=analysis
+        )
+        self.db.add(db_analysis)
+        self.db.commit()
+        self.db.refresh(db_analysis)
+        return db_analysis

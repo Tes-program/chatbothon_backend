@@ -1,3 +1,6 @@
 venv
 .env
 *.pyc
+alembic.ini
+alembic/versions/*
+chroma_db

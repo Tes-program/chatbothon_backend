@@ -72,55 +72,69 @@ Provide a clear analysis of the above points based on the content."""
         }
 
     async def answer_question(self, question: str, document_id: str) -> str:
-        relevant_chunks = self.vector_store.get_relevant_chunks(
-            question,
-            document_id=document_id  # Pass to vector store
-        )
-        answers = []
+        try:
+            # Debug logging
+            print(f"Getting chunks for document: {document_id}")
 
-        for chunk in relevant_chunks:
+            relevant_chunks = self.vector_store.get_relevant_chunks(
+                question=question,
+                document_id=document_id
+            )
+
+            # Debug logging
+            print(f"Retrieved chunks: {relevant_chunks}")
+
+            if not relevant_chunks:
+                return (
+                    "I couldn't find relevant information to answer your question.")
+
+            # Single completion instead of multiple
             completion = self.client.chat.completions.create(
                 model="llama-3.2-3b-preview",
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are a legal assistant. "
-                                "Provide clear and concise answers."
+                        "content": (
+                            "You are a helpful assistant analyzing documents. "
+                            "Provide clear and concise answers based on the given context."
+                        )
                     },
                     {
                         "role": "user",
-                        "content": (f"Using this context: {chunk}\n\n"
-                                    f"Answer this question: {question}")
+                        "content": (
+                            f"""Using this context: """
+                            f"""{' '.join(relevant_chunks)}
+
+Question: {question}
+
+Provide a clear and direct answer based on the context."""
+                        )
                     }
                 ],
-                temperature=0.6,
-                max_completion_tokens=1024,
-                top_p=1
+                temperature=0.7,
+                max_completion_tokens=1024
             )
-            answers.append(completion.choices[0].message.content)
 
-        return " ".join(answers)
+            return completion.choices[0].message.content
+        except Exception as e:
+            print(f"Error in answer_question: {str(e)}")
+            return f"Error processing question: {str(e)}"
 
     async def generate_title(self, content: str) -> str:
-        prompt = (
-            f"""Generate a concise and descriptive title for this legal
-            document.
-        The title should be clear and indicate the document's main purpose.
+        prompt = f"""Generate a concise title (4-6 words max) that captures the document's core purpose.
+    
+Content: {content}
 
-        Content: {content}
-
-        Return only the title, nothing else."""
-        )
+Return ONLY the title."""
 
         response = self.client.chat.completions.create(
             model="llama-3.2-3b-preview",
             messages=[
-                {"role": "system",
-                 "content": "You are a legal document analyzer."},
+                {"role": "system", "content": "Generate brief, focused document titles"},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.7,
-            max_completion_tokens=50
+            temperature=0.3,  # Reduced for more focused output
+            max_completion_tokens=20  # Reduced token limit
         )
 
         return response.choices[0].message.content.strip()
