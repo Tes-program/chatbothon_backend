@@ -163,8 +163,8 @@ Keep questions concise and directly related to the content."""
                 },
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.7,
-            max_completion_tokens=150
+            temperature=0.4,
+            max_completion_tokens=100
         )
 
     # Split response into individual questions and clean them
