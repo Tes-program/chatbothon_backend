@@ -38,6 +38,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.on_event("startup")
+async def startup_event():
+    import os
+    upload_dir = "uploads"
+    try:
+        os.makedirs(upload_dir, exist_ok=True)
+        logger.info(f"Upload directory created/verified: {upload_dir}")
+        # Test write permissions
+        test_file = os.path.join(upload_dir, "test.txt")
+        with open(test_file, "w") as f:
+            f.write("test")
+        os.remove(test_file)
+        logger.info("Upload directory write test successful")
+    except Exception as e:
+        logger.error(f"Upload directory setup failed: {str(e)}", exc_info=True)
+
 app.include_router(auth_router, prefix="/auth", tags=["auth"])
 
 
@@ -53,52 +70,73 @@ async def upload_document(
     db: Session = Depends(get_db)
 ):
     try:
-        logger.debug(f"Starting upload process for file: {file.filename}")
-        content = await file.read()
-        logger.debug(f"File size: {len(content)} bytes")
-        logger.debug("Processing document...")
-        chunks = document_processor.process_pdf(content)
-        logger.debug(f"Created {len(chunks)} chunks")
-
-        await file.seek(0) 
-        logger.debug("Starting LLM analysis...")
-        result = await llm_service.analyze_document(chunks)
-        logger.debug("LLM analysis completed")
+        # Log file info first
+        logger.info(f"Starting upload for file: {file.filename}, size: {file.size}")
         
-        logger.debug("Saving document...")
+        content = await file.read()
+        logger.info(f"File read successful, content length: {len(content)}")
+        
+        try:
+            chunks = document_processor.process_pdf(content)
+            logger.info(f"PDF processing successful, chunks created: {len(chunks)}")
+        except Exception as e:
+            logger.error(f"PDF processing failed: {str(e)}", exc_info=True)
+            raise HTTPException(status_code=500, detail=f"PDF processing failed: {str(e)}")
 
-        document_service = DocumentService(db)
-        document = await document_service.save_document(
-            file,
-            current_user.id,
-            title=result["title"]
-        )
-        logger.debug(f"Document saved with ID: {document.id}")
+        await file.seek(0)
+        
+        try:
+            result = await llm_service.analyze_document(chunks)
+            logger.info("Document analysis completed")
+        except Exception as e:
+            logger.error(f"Document analysis failed: {str(e)}", exc_info=True)
+            raise HTTPException(status_code=500, detail=f"Document analysis failed: {str(e)}")
 
-        # Store initial chat history with analysis
-        logger.debug("Storing chat history...")
-        chat = ChatHistory(
-            document_id=document.id,
-            question="What is this document about?",
-            answer=result["analysis"]
-        )
-        db.add(chat)
-        db.commit()
-        db.refresh(chat)
-        logger.debug("Chat history stored")     
-        logger.debug("Storing in vector database...")
+        try:
+            document_service = DocumentService(db)
+            document = await document_service.save_document(
+                file, 
+                current_user.id, 
+                title=result["title"]
+            )
+            logger.info(f"Document saved successfully with ID: {document.id}")
+        except Exception as e:
+            logger.error(f"Document save failed: {str(e)}", exc_info=True)
+            raise HTTPException(status_code=500, detail=f"Document save failed: {str(e)}")
 
-        document_id = f"user_{current_user.id}_{document.id}"
-        document_service.vector_store.store_chunks(chunks, document_id)
-        logger.debug("Vector storage complete")
+        # Add chat history
+        try:
+            chat = ChatHistory(
+                document_id=document.id,
+                question="What is this document about?",
+                answer=result["analysis"]
+            )
+            db.add(chat)
+            db.commit()
+            logger.info("Chat history saved")
+        except Exception as e:
+            logger.error(f"Chat history save failed: {str(e)}", exc_info=True)
+            raise HTTPException(status_code=500, detail=f"Chat history save failed: {str(e)}")
+
+        # Vector store
+        try:
+            document_id = f"user_{current_user.id}_{document.id}"
+            document_service.vector_store.store_chunks(chunks, document_id)
+            logger.info("Vector storage completed")
+        except Exception as e:
+            logger.error(f"Vector storage failed: {str(e)}", exc_info=True)
+            raise HTTPException(status_code=500, detail=f"Vector storage failed: {str(e)}")
 
         return {
             "document_id": document.id,
             "title": result["title"],
             "analysis": result["analysis"]
         }
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Unexpected error in upload: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
 
 @app.post("/ask")
