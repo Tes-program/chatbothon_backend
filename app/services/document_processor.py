@@ -9,6 +9,10 @@ from nltk.tokenize import word_tokenize
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from pdfminer.high_level import extract_text
 from io import BytesIO
+import logging
+
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 
 class DocumentProcessor:
@@ -22,10 +26,22 @@ class DocumentProcessor:
         )
 
     def process_pdf(self, content: bytes) -> List[str]:
-        document = extract_text(BytesIO(content))
-        cleaned_text = self.preprocess_text(document)
-        chunks = self.text_splitter.split_text(cleaned_text)
-        return chunks
+        try:
+            logger.debug("Starting PDF text extraction")
+            document = extract_text(BytesIO(content))
+            logger.debug("PDF text extracted successfully")       
+            logger.debug("Starting text preprocessing")
+            cleaned_text = self.preprocess_text(document)
+            logger.debug("Text preprocessing completed")
+
+            logger.debug("Creating chunks")
+            chunks = self.text_splitter.split_text(cleaned_text)
+            logger.debug(f"Created {len(chunks)} chunks")
+
+            return chunks
+        except Exception as e:
+            logger.error(f"Error processing PDF: {e}")
+            raise
 
     def preprocess_text(self, text: str) -> str:
         # Convert to lowercase

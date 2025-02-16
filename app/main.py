@@ -14,6 +14,7 @@ from .models import user
 from .database import engine, get_db
 from fastapi import Request
 from pydantic import BaseModel
+import logging
 
 
 app = FastAPI()
@@ -23,6 +24,9 @@ llm_service = LLMService()
 user.Base.metadata.create_all(bind=engine)
 limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
+
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 
 # CORS middleware setup
@@ -49,19 +53,30 @@ async def upload_document(
     db: Session = Depends(get_db)
 ):
     try:
+        logger.debug(f"Starting upload process for file: {file.filename}")
         content = await file.read()
+        logger.debug(f"File size: {len(content)} bytes")
+        logger.debug("Processing document...")
         chunks = document_processor.process_pdf(content)
-        await file.seek(0)
+        logger.debug(f"Created {len(chunks)} chunks")
 
+        await file.seek(0) 
+        logger.debug("Starting LLM analysis...")
         result = await llm_service.analyze_document(chunks)
+        logger.debug("LLM analysis completed")
+        
+        logger.debug("Saving document...")
+
         document_service = DocumentService(db)
         document = await document_service.save_document(
             file,
             current_user.id,
             title=result["title"]
         )
+        logger.debug(f"Document saved with ID: {document.id}")
 
         # Store initial chat history with analysis
+        logger.debug("Storing chat history...")
         chat = ChatHistory(
             document_id=document.id,
             question="What is this document about?",
@@ -70,9 +85,12 @@ async def upload_document(
         db.add(chat)
         db.commit()
         db.refresh(chat)
+        logger.debug("Chat history stored")     
+        logger.debug("Storing in vector database...")
 
         document_id = f"user_{current_user.id}_{document.id}"
         document_service.vector_store.store_chunks(chunks, document_id)
+        logger.debug("Vector storage complete")
 
         return {
             "document_id": document.id,
