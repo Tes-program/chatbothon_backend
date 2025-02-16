@@ -71,38 +71,43 @@ async def upload_document(
 ):
     try:
         # Log file info first
-        logger.info(f"Starting upload for file: {file.filename}, size: {file.size}")
-        
+        logger.info(
+            f"Starting upload for file: {file.filename}, size: {file.size}")
+
         content = await file.read()
         logger.info(f"File read successful, content length: {len(content)}")
-        
+
         try:
             chunks = document_processor.process_pdf(content)
-            logger.info(f"PDF processing successful, chunks created: {len(chunks)}")
+            logger.info(
+                f"PDF processing successful, chunks created: {len(chunks)}")
         except Exception as e:
             logger.error(f"PDF processing failed: {str(e)}", exc_info=True)
-            raise HTTPException(status_code=500, detail=f"PDF processing failed: {str(e)}")
+            raise HTTPException(
+                status_code=500, detail=f"PDF processing failed: {str(e)}")
 
         await file.seek(0)
-        
+
         try:
             result = await llm_service.analyze_document(chunks)
             logger.info("Document analysis completed")
         except Exception as e:
             logger.error(f"Document analysis failed: {str(e)}", exc_info=True)
-            raise HTTPException(status_code=500, detail=f"Document analysis failed: {str(e)}")
+            raise HTTPException(
+                status_code=500, detail=f"Document analysis failed: {str(e)}")
 
         try:
             document_service = DocumentService(db)
             document = await document_service.save_document(
-                file, 
-                current_user.id, 
+                file,
+                current_user.id,
                 title=result["title"]
             )
             logger.info(f"Document saved successfully with ID: {document.id}")
         except Exception as e:
             logger.error(f"Document save failed: {str(e)}", exc_info=True)
-            raise HTTPException(status_code=500, detail=f"Document save failed: {str(e)}")
+            raise HTTPException(
+                status_code=500, detail=f"Document save failed: {str(e)}")
 
         # Add chat history
         try:
@@ -116,7 +121,8 @@ async def upload_document(
             logger.info("Chat history saved")
         except Exception as e:
             logger.error(f"Chat history save failed: {str(e)}", exc_info=True)
-            raise HTTPException(status_code=500, detail=f"Chat history save failed: {str(e)}")
+            raise HTTPException(
+                status_code=500, detail=f"Chat history save failed: {str(e)}")
 
         # Vector store
         try:
@@ -125,7 +131,8 @@ async def upload_document(
             logger.info("Vector storage completed")
         except Exception as e:
             logger.error(f"Vector storage failed: {str(e)}", exc_info=True)
-            raise HTTPException(status_code=500, detail=f"Vector storage failed: {str(e)}")
+            raise HTTPException(
+                status_code=500, detail=f"Vector storage failed: {str(e)}")
 
         return {
             "document_id": document.id,
@@ -298,6 +305,7 @@ async def add_chat(
         "created_at": chat.created_at
     }
 
+
 @app.get("/documents/{document_id}/suggested-prompts")
 async def get_suggested_prompts(
     document_id: int,
@@ -309,7 +317,7 @@ async def get_suggested_prompts(
         .filter(
             user.Document.id == document_id,
             user.Document.user_id == current_user.id
-        ).first()
+    ).first()
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
 
