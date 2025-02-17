@@ -63,6 +63,11 @@ class QuestionRequest(BaseModel):
     document_id: int
 
 
+@app.get("/")
+async def health_check():
+    return {"status": "healthy"}
+
+
 @app.post("/upload")
 async def upload_document(
     file: UploadFile = File(...),
